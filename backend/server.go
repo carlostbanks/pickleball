@@ -3,12 +3,14 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/golang-jwt/jwt/v4"
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	"github.com/rs/cors"
@@ -78,6 +80,8 @@ var (
 	googleOAuthConfig *oauth2.Config
 	oauthStateString  = "random-state" // In production, generate a random state string
 )
+
+var jwtSecret = []byte("your-secret-key")
 
 func main() {
 	// Connect to database
@@ -161,6 +165,7 @@ func setupRoutes() {
 	// Add Google OAuth routes
 	http.HandleFunc("/auth/google/login", logMiddleware(handleGoogleLogin))
 	http.HandleFunc("/auth/google/callback", logMiddleware(handleGoogleCallback))
+	http.HandleFunc("/auth/logout", logMiddleware(logoutHandler))
 
 	// Add user API endpoint
 	http.HandleFunc("/api/users/me", logMiddleware(getCurrentUser))
@@ -249,33 +254,82 @@ func handleGoogleCallback(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Failed to update user", http.StatusInternalServerError)
 			return
 		}
+
+		// Use the updated user
+		user = existingUser
 	}
 
-	// Generate JWT token
-	// For simplicity, we'll just set a cookie with the user ID for now
+	// Create JWT token
+	expirationTime := time.Now().Add(24 * time.Hour)
+	claims := &jwt.RegisteredClaims{
+		Subject:   user.ID,
+		ExpiresAt: jwt.NewNumericDate(expirationTime),
+		IssuedAt:  jwt.NewNumericDate(time.Now()),
+	}
+
+	jwtToken := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenString, err := jwtToken.SignedString(jwtSecret)
+	if err != nil {
+		log.Printf("Failed to generate JWT: %v", err)
+		http.Error(w, "Failed to generate token", http.StatusInternalServerError)
+		return
+	}
+
+	// Set JWT token in cookie
 	http.SetCookie(w, &http.Cookie{
-		Name:     "user_id",
-		Value:    user.ID,
+		Name:     "token",
+		Value:    tokenString,
 		Path:     "/",
 		HttpOnly: true,
 		Secure:   false,     // Set to true in production with HTTPS
 		MaxAge:   3600 * 24, // 24 hours
 	})
 
-	// Redirect back to frontend
-	http.Redirect(w, r, "http://localhost:3000", http.StatusTemporaryRedirect)
+	// Redirect back to frontend with token in URL
+	// This allows the frontend to capture the token
+	redirectURL := fmt.Sprintf("http://localhost:3000/auth-callback?token=%s", tokenString)
+	http.Redirect(w, r, redirectURL, http.StatusTemporaryRedirect)
 }
 
 // Get current user handler
 func getCurrentUser(w http.ResponseWriter, r *http.Request) {
-	// Get user ID from cookie
-	cookie, err := r.Cookie("user_id")
+	// Get token from Authorization header
+	authHeader := r.Header.Get("Authorization")
+	if authHeader == "" {
+		// Try to get from cookie as fallback
+		cookie, err := r.Cookie("token")
+		if err != nil {
+			http.Error(w, "Not authenticated", http.StatusUnauthorized)
+			return
+		}
+		authHeader = "Bearer " + cookie.Value
+	}
+
+	// Extract token from Bearer prefix
+	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+
+	// Parse and validate token
+	token, err := jwt.ParseWithClaims(tokenString, &jwt.RegisteredClaims{}, func(token *jwt.Token) (interface{}, error) {
+		// Validate signing method
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return jwtSecret, nil
+	})
+
 	if err != nil {
-		http.Error(w, "Not authenticated", http.StatusUnauthorized)
+		http.Error(w, "Invalid token", http.StatusUnauthorized)
 		return
 	}
 
-	userID := cookie.Value
+	// Extract user ID from claims
+	claims, ok := token.Claims.(*jwt.RegisteredClaims)
+	if !ok || !token.Valid {
+		http.Error(w, "Invalid token claims", http.StatusUnauthorized)
+		return
+	}
+
+	userID := claims.Subject
 
 	// Get user from database
 	var user User
@@ -454,15 +508,22 @@ func getBookingsHandler(w http.ResponseWriter, r *http.Request) {
 
 // createBookingHandler handles POST requests to create a booking
 func createBookingHandler(w http.ResponseWriter, r *http.Request) {
+
+	// Get user ID from token
+	userID := getUserIDFromRequest(r)
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	// Parse request body
 	var input struct {
-		CourtID         string   `json:"court_id"`
-		UserID          string   `json:"user_id"`
+		CourtID         string   `json:"courtId"` // Changed from court_id to match frontend
 		Date            string   `json:"date"`
-		StartTime       string   `json:"start_time"`
-		EndTime         string   `json:"end_time"`
-		NumberOfPlayers int      `json:"number_of_players"`
-		PlayerEmails    []string `json:"player_emails"`
+		StartTime       string   `json:"startTime"`       // Changed from start_time
+		EndTime         string   `json:"endTime"`         // Changed from end_time
+		NumberOfPlayers int      `json:"numberOfPlayers"` // Changed from number_of_players
+		PlayerEmails    []string `json:"playerEmails"`    // Changed from player_emails
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
@@ -508,7 +569,7 @@ func createBookingHandler(w http.ResponseWriter, r *http.Request) {
 	booking := Booking{
 		ID:                uuid.New().String(),
 		CourtID:           input.CourtID,
-		UserID:            input.UserID,
+		UserID:            userID, // Use the authenticated user's ID
 		Date:              input.Date,
 		StartTime:         input.StartTime,
 		EndTime:           input.EndTime,
@@ -534,4 +595,61 @@ func createBookingHandler(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(booking); err != nil {
 		log.Printf("Error encoding response: %v", err)
 	}
+}
+
+// Add this helper function to extract user ID from JWT token
+func getUserIDFromRequest(r *http.Request) string {
+	// Get token from Authorization header
+	authHeader := r.Header.Get("Authorization")
+	if authHeader == "" {
+		// Try to get from cookie as fallback
+		cookie, err := r.Cookie("token")
+		if err != nil {
+			return ""
+		}
+		authHeader = "Bearer " + cookie.Value
+	}
+
+	// Extract token from Bearer prefix
+	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+
+	// Parse and validate token
+	token, err := jwt.ParseWithClaims(tokenString, &jwt.RegisteredClaims{}, func(token *jwt.Token) (interface{}, error) {
+		// Validate signing method
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return jwtSecret, nil
+	})
+
+	if err != nil {
+		return ""
+	}
+
+	// Extract user ID from claims
+	claims, ok := token.Claims.(*jwt.RegisteredClaims)
+	if !ok || !token.Valid {
+		return ""
+	}
+
+	return claims.Subject
+}
+
+// logoutHandler handles POST requests to log out a user
+func logoutHandler(w http.ResponseWriter, r *http.Request) {
+	// Clear the token cookie
+	http.SetCookie(w, &http.Cookie{
+		Name:     "token",
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   false, // Set to true in production with HTTPS
+		MaxAge:   -1,    // Delete the cookie
+	})
+
+	// Return success response
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{
+		"success": true,
+	})
 }

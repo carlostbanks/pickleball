@@ -1,4 +1,4 @@
-// pickle/frontend/src/hooks/useAuth.tsx
+// src/hooks/useAuth.tsx
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { AuthState, User } from '../types';
 import apiService from '../services/api';
@@ -8,6 +8,7 @@ interface AuthContextType {
   auth: AuthState;
   login: () => void;
   logout: () => Promise<void>;
+  loginWithToken: (token: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -24,21 +25,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Check if user is already authenticated on mount
   useEffect(() => {
     const checkAuth = async () => {
-      try {
-        // Temporarily comment out API call during development
-        // const user = await apiService.auth.getCurrentUser();
+      const token = localStorage.getItem('token');
+      
+      if (!token) {
         setAuth({
           isAuthenticated: false,
           user: null,
           loading: false,
           error: null,
         });
+        return;
+      }
+      
+      try {
+        const user = await apiService.auth.getCurrentUser();
+        setAuth({
+          isAuthenticated: true,
+          user,
+          loading: false,
+          error: null,
+        });
       } catch (error) {
+        // Token might be invalid or expired
+        localStorage.removeItem('token');
         setAuth({
           isAuthenticated: false,
           user: null,
           loading: false,
-          error: null,
+          error: "Authentication failed",
         });
       }
     };
@@ -55,6 +69,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const logout = async () => {
     try {
       await apiService.auth.logout();
+      localStorage.removeItem('token');
       setAuth({
         isAuthenticated: false,
         user: null,
@@ -68,9 +83,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
     }
   };
+  
+  // Login with token (for auth callback)
+  const loginWithToken = async (token: string) => {
+    try {
+      // Set the token in localStorage (should already be done in callback)
+      localStorage.setItem('token', token);
+      
+      // Get user with the token
+      const user = await apiService.auth.getCurrentUser();
+      
+      setAuth({
+        isAuthenticated: true,
+        user,
+        loading: false,
+        error: null,
+      });
+    } catch (error) {
+      setAuth({
+        isAuthenticated: false,
+        user: null,
+        loading: false,
+        error: "Failed to authenticate with token",
+      });
+    }
+  };
 
   return (
-    <AuthContext.Provider value={{ auth, login, logout }}>
+    <AuthContext.Provider value={{ auth, login, logout, loginWithToken }}>
       {children}
     </AuthContext.Provider>
   );

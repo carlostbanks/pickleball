@@ -29,7 +29,7 @@ const api: AxiosInstance = axios.create({
 
 // Add request interceptor to include token if available
 api.interceptors.request.use(
-    (config: InternalAxiosRequestConfig) => {
+  (config: InternalAxiosRequestConfig) => {
     const token = localStorage.getItem('token');
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`;

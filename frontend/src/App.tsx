@@ -8,6 +8,7 @@ import CourtsPage from './pages/CourtsPage';
 import CourtDetailPage from './pages/CourtDetailPage';
 import BookingsPage from './pages/BookingsPage';
 import NotFound from './pages/NotFound';
+import AuthCallback from './pages/AuthCallback';
 import './App.css';
 
 // Protected route component
@@ -34,6 +35,7 @@ const App: React.FC = () => {
           <Route path="/" element={<Home />} />
           <Route path="/courts" element={<CourtsPage />} />
           <Route path="/courts/:id" element={<CourtDetailPage />} />
+          <Route path="/auth-callback" element={<AuthCallback />} />
           <Route
             path="/bookings"
             element={
