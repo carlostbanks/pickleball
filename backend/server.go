@@ -10,6 +10,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/joho/godotenv"
+	"github.com/rs/cors"
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -70,8 +74,17 @@ func (User) TableName() string {
 
 var db *gorm.DB
 
+var (
+	googleOAuthConfig *oauth2.Config
+	oauthStateString  = "random-state" // In production, generate a random state string
+)
+
 func main() {
 	// Connect to database
+	// Load .env file if it exists
+	if err := godotenv.Load(); err != nil {
+		log.Println("No .env file found, using environment variables")
+	}
 	var err error
 	dsn := "host=localhost user=postgres password=postgres dbname=pickle port=5432 sslmode=disable"
 	db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
@@ -92,16 +105,33 @@ func main() {
 
 	log.Println("Connected to database successfully")
 
+	// Initialize OAuth config
+	googleOAuthConfig = &oauth2.Config{
+		RedirectURL:  "http://localhost:8080/auth/google/callback",
+		ClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
+		ClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
+		Scopes:       []string{"https://www.googleapis.com/auth/userinfo.email", "https://www.googleapis.com/auth/userinfo.profile"},
+		Endpoint:     google.Endpoint,
+	}
+
 	// Set up HTTP routes with logging
 	setupRoutes()
 
-	// Start HTTP server
+	// Set up CORS wrapper
+	corsHandler := cors.New(cors.Options{
+		AllowedOrigins:   []string{"http://localhost:3000"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Content-Type", "Authorization"},
+		AllowCredentials: true,
+	}).Handler(http.DefaultServeMux)
+
+	// Start HTTP server with CORS middleware
 	port := os.Getenv("HTTP_PORT")
 	if port == "" {
 		port = "8080"
 	}
 	log.Printf("Starting HTTP server on port %s", port)
-	if err := http.ListenAndServe(":"+port, nil); err != nil {
+	if err := http.ListenAndServe(":"+port, corsHandler); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}
 }
@@ -122,10 +152,148 @@ func logMiddleware(next http.HandlerFunc) http.HandlerFunc {
 
 // setupRoutes sets up all HTTP routes with logging middleware
 func setupRoutes() {
+	// Your existing routes...
 	http.HandleFunc("/health", logMiddleware(healthHandler))
 	http.HandleFunc("/api/courts", logMiddleware(courtsHandler))
 	http.HandleFunc("/api/courts/", logMiddleware(courtDetailHandler))
 	http.HandleFunc("/api/bookings", logMiddleware(bookingsHandler))
+
+	// Add Google OAuth routes
+	http.HandleFunc("/auth/google/login", logMiddleware(handleGoogleLogin))
+	http.HandleFunc("/auth/google/callback", logMiddleware(handleGoogleCallback))
+
+	// Add user API endpoint
+	http.HandleFunc("/api/users/me", logMiddleware(getCurrentUser))
+}
+
+// Google OAuth login handler
+func handleGoogleLogin(w http.ResponseWriter, r *http.Request) {
+	url := googleOAuthConfig.AuthCodeURL(oauthStateString)
+	http.Redirect(w, r, url, http.StatusTemporaryRedirect)
+}
+
+// Google OAuth callback handler
+func handleGoogleCallback(w http.ResponseWriter, r *http.Request) {
+	// Verify state
+	state := r.FormValue("state")
+	if state != oauthStateString {
+		http.Error(w, "Invalid state", http.StatusBadRequest)
+		return
+	}
+
+	// Exchange code for token
+	code := r.FormValue("code")
+	token, err := googleOAuthConfig.Exchange(r.Context(), code)
+	if err != nil {
+		log.Printf("Code exchange failed: %v", err)
+		http.Error(w, "Code exchange failed", http.StatusInternalServerError)
+		return
+	}
+
+	// Get user info
+	client := googleOAuthConfig.Client(r.Context(), token)
+	resp, err := client.Get("https://www.googleapis.com/oauth2/v2/userinfo")
+	if err != nil {
+		log.Printf("Failed to get user info: %v", err)
+		http.Error(w, "Failed to get user info", http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
+
+	// Parse user info
+	var userInfo struct {
+		ID      string `json:"id"`
+		Email   string `json:"email"`
+		Name    string `json:"name"`
+		Picture string `json:"picture"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&userInfo); err != nil {
+		log.Printf("Failed to parse user info: %v", err)
+		http.Error(w, "Failed to parse user info", http.StatusInternalServerError)
+		return
+	}
+
+	// Create or update user in database
+	user := User{
+		ID:        userInfo.ID,
+		Email:     userInfo.Email,
+		Name:      userInfo.Name,
+		Picture:   userInfo.Picture,
+		CreatedAt: time.Now(),
+	}
+
+	// Check if user exists
+	var existingUser User
+	result := db.Where("id = ?", user.ID).First(&existingUser)
+	if result.Error != nil {
+		if result.Error == gorm.ErrRecordNotFound {
+			// Create new user
+			if err := db.Create(&user).Error; err != nil {
+				log.Printf("Failed to create user: %v", err)
+				http.Error(w, "Failed to create user", http.StatusInternalServerError)
+				return
+			}
+		} else {
+			log.Printf("Database error: %v", result.Error)
+			http.Error(w, "Database error", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		// Update existing user
+		existingUser.Email = user.Email
+		existingUser.Name = user.Name
+		existingUser.Picture = user.Picture
+		if err := db.Save(&existingUser).Error; err != nil {
+			log.Printf("Failed to update user: %v", err)
+			http.Error(w, "Failed to update user", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Generate JWT token
+	// For simplicity, we'll just set a cookie with the user ID for now
+	http.SetCookie(w, &http.Cookie{
+		Name:     "user_id",
+		Value:    user.ID,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   false,     // Set to true in production with HTTPS
+		MaxAge:   3600 * 24, // 24 hours
+	})
+
+	// Redirect back to frontend
+	http.Redirect(w, r, "http://localhost:3000", http.StatusTemporaryRedirect)
+}
+
+// Get current user handler
+func getCurrentUser(w http.ResponseWriter, r *http.Request) {
+	// Get user ID from cookie
+	cookie, err := r.Cookie("user_id")
+	if err != nil {
+		http.Error(w, "Not authenticated", http.StatusUnauthorized)
+		return
+	}
+
+	userID := cookie.Value
+
+	// Get user from database
+	var user User
+	if err := db.Where("id = ?", userID).First(&user).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			http.Error(w, "User not found", http.StatusNotFound)
+		} else {
+			log.Printf("Database error: %v", err)
+			http.Error(w, "Database error", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	// Return user as JSON
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(user); err != nil {
+		log.Printf("Error encoding user: %v", err)
+	}
 }
 
 // healthHandler is a simple health check endpoint
