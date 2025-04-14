@@ -1,0 +1,292 @@
+/* pickle/frontend/src/pages/CourtDetailPage.css */
+.court-detail-page {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 2rem 1rem;
+  }
+  
+  .loading, .error {
+    text-align: center;
+    padding: 2rem;
+    color: #666;
+  }
+  
+  .error {
+    color: #d32f2f;
+  }
+  
+  .court-header {
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+    margin-bottom: 3rem;
+  }
+  
+  .court-image {
+    width: 100%;
+    height: 300px;
+    overflow: hidden;
+    border-radius: 8px;
+  }
+  
+  .court-image img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  
+  .court-info {
+    flex: 1;
+  }
+  
+  .court-info h1 {
+    margin-bottom: 0.5rem;
+    color: #333;
+  }
+  
+  .court-address {
+    color: #666;
+    margin-bottom: 1.5rem;
+    font-size: 1rem;
+  }
+  
+  .court-details {
+    margin-bottom: 2rem;
+  }
+  
+  .detail-item {
+    margin-bottom: 1rem;
+  }
+  
+  .detail-label {
+    font-weight: 500;
+    color: #555;
+    margin-right: 0.5rem;
+  }
+  
+  .amenities-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+  }
+  
+  .amenity-tag {
+    display: inline-block;
+    padding: 0.25rem 0.5rem;
+    background-color: #f1f3f4;
+    border-radius: 16px;
+    font-size: 0.8rem;
+    color: #555;
+  }
+  
+  .login-prompt {
+    color: #666;
+    font-style: italic;
+  }
+  
+  .booking-success {
+    background-color: #e6f4ea;
+    color: #137333;
+    padding: 1rem;
+    border-radius: 4px;
+    margin-bottom: 2rem;
+    text-align: center;
+  }
+  
+  .booking-form-container {
+    background-color: #f9f9f9;
+    padding: 2rem;
+    border-radius: 8px;
+    margin-bottom: 3rem;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+  }
+  
+  .booking-form-container h2 {
+    margin-bottom: 1.5rem;
+    color: #333;
+  }
+  
+  .booking-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+  
+  .form-row {
+    display: flex;
+    gap: 1rem;
+  }
+  
+  .form-group {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+  }
+  
+  .form-group label {
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+    color: #555;
+  }
+  
+  .form-group input,
+  .form-group select {
+    padding: 0.75rem;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 1rem;
+  }
+  
+  .player-emails {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  
+  .form-hint {
+    margin-top: 0.5rem;
+    font-size: 0.8rem;
+    color: #666;
+  }
+  
+  .form-error {
+    color: #d32f2f;
+    margin-bottom: 1rem;
+  }
+  
+  .availability-section {
+    margin-top: 3rem;
+  }
+  
+  .availability-section h2 {
+    margin-bottom: 1.5rem;
+    color: #333;
+  }
+  
+  .date-selector {
+    display: flex;
+    gap: 0.5rem;
+    overflow-x: auto;
+    padding-bottom: 1rem;
+    margin-bottom: 2rem;
+  }
+  
+  .date-button {
+    padding: 0.75rem 1rem;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    background-color: white;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  
+  .date-button.active {
+    background-color: #1a73e8;
+    color: white;
+    border-color: #1a73e8;
+  }
+  
+  .availability-grid {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  
+  .time-labels {
+    display: flex;
+    border-bottom: 1px solid #ddd;
+  }
+  
+  .time-labels .time-slot {
+    flex: 1;
+    padding: 0.75rem;
+    text-align: center;
+    font-weight: 500;
+    background-color: #f9f9f9;
+  }
+  
+  .court-slots {
+    display: flex;
+    flex-direction: column;
+  }
+  
+  .court-row {
+    display: flex;
+    border-bottom: 1px solid #ddd;
+  }
+  
+  .court-row:last-child {
+    border-bottom: none;
+  }
+  
+  .court-label {
+    width: 100px;
+    padding: 0.75rem;
+    font-weight: 500;
+    background-color: #f9f9f9;
+    border-right: 1px solid #ddd;
+  }
+  
+  .time-slots {
+    display: flex;
+    flex: 1;
+  }
+  
+  .time-slot {
+    flex: 1;
+    padding: 0.75rem;
+    text-align: center;
+    border-right: 1px solid #ddd;
+  }
+  
+  .time-slot:last-child {
+    border-right: none;
+  }
+  
+  .time-slot.available {
+    background-color: #e6f4ea;
+    color: #137333;
+  }
+  
+  .time-slot.booked {
+    background-color: #fce8e6;
+    color: #c5221f;
+  }
+  
+  .btn {
+    display: inline-block;
+    padding: 0.75rem 1.5rem;
+    border: none;
+    border-radius: 4px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 0.3s;
+    text-decoration: none;
+  }
+  
+  .btn-primary {
+    background-color: #1a73e8;
+    color: white;
+  }
+  
+  .btn-primary:hover {
+    background-color: #1557b0;
+  }
+  
+  @media (min-width: 768px) {
+    .court-header {
+      flex-direction: row;
+    }
+  
+    .court-image {
+      flex: 1;
+      height: auto;
+    }
+    
+    .form-row {
+      flex-direction: row;
+    }
+  }
