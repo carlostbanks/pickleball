@@ -2,7 +2,10 @@
 
 A full-stack application for finding and booking pickleball/padel ball courts. This project uses a Go backend with GORM and a React/TypeScript frontend.
 
-https://i.ibb.co/rG1pgJ95/Screenshot-2025-04-14-at-10-37-54-PM.png
+
+
+![PadelPro Homepage Screenshot](https://i.ibb.co/rG1pgJ95/Screenshot-2025-04-14-at-10-37-54-PM.png)
+
 
 ## Features
 
