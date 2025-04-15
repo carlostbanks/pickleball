@@ -161,6 +161,7 @@ func setupRoutes() {
 	http.HandleFunc("/api/courts", logMiddleware(courtsHandler))
 	http.HandleFunc("/api/courts/", logMiddleware(courtDetailHandler))
 	http.HandleFunc("/api/bookings", logMiddleware(bookingsHandler))
+	http.HandleFunc("/api/bookings/", logMiddleware(bookingDetailHandler))
 
 	// Add Google OAuth routes
 	http.HandleFunc("/auth/google/login", logMiddleware(handleGoogleLogin))
@@ -455,20 +456,166 @@ func bookingsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func bookingDetailHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		getBookingsHandler(w, r)
+	case http.MethodPut:
+		updateBookingHandler(w, r)
+	case http.MethodDelete:
+		cancelBookingHandler(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// And implement the cancel booking handler
+func cancelBookingHandler(w http.ResponseWriter, r *http.Request) {
+	// Get user ID from JWT token
+	userID := getUserIDFromRequest(r)
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Extract booking ID from URL
+	parts := strings.Split(r.URL.Path, "/")
+	if len(parts) < 3 {
+		http.Error(w, "Invalid booking ID", http.StatusBadRequest)
+		return
+	}
+
+	bookingID := parts[len(parts)-1]
+
+	// Check if booking exists and belongs to this user
+	var booking Booking
+	if err := db.Where("id = ?", bookingID).First(&booking).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			http.Error(w, "Booking not found", http.StatusNotFound)
+		} else {
+			log.Printf("Database error: %v", err)
+			http.Error(w, "Database error", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	// Verify that the booking belongs to the authenticated user
+	if booking.UserID != userID {
+		http.Error(w, "Not authorized to cancel this booking", http.StatusForbidden)
+		return
+	}
+
+	// Update booking status to CANCELLED
+	if err := db.Model(&booking).Update("status", "CANCELLED").Error; err != nil {
+		log.Printf("Error updating booking: %v", err)
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+
+	// Return success response
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Booking cancelled successfully",
+	}); err != nil {
+		log.Printf("Error encoding response: %v", err)
+	}
+}
+
+// updateBookingHandler handles PUT requests to update a booking
+func updateBookingHandler(w http.ResponseWriter, r *http.Request) {
+	// Get user ID from JWT token
+	userID := getUserIDFromRequest(r)
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Extract booking ID from URL
+	parts := strings.Split(r.URL.Path, "/")
+	if len(parts) < 3 {
+		http.Error(w, "Invalid booking ID", http.StatusBadRequest)
+		return
+	}
+
+	bookingID := parts[len(parts)-1]
+
+	// Parse request body
+	var input struct {
+		StartTime       string   `json:"startTime"`
+		EndTime         string   `json:"endTime"`
+		NumberOfPlayers int      `json:"numberOfPlayers"`
+		PlayerEmails    []string `json:"playerEmails"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Fetch the booking
+	var booking Booking
+	if err := db.Where("id = ?", bookingID).First(&booking).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			http.Error(w, "Booking not found", http.StatusNotFound)
+		} else {
+			log.Printf("Database error: %v", err)
+			http.Error(w, "Database error", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	// Verify ownership
+	if booking.UserID != userID {
+		http.Error(w, "Not authorized to update this booking", http.StatusForbidden)
+		return
+	}
+
+	// Update booking fields
+	booking.StartTime = input.StartTime
+	booking.EndTime = input.EndTime
+	booking.NumberOfPlayers = input.NumberOfPlayers
+	booking.PlayerEmailsArray = "{" + strings.Join(input.PlayerEmails, ",") + "}"
+	booking.UpdatedAt = time.Now()
+
+	// Save changes
+	if err := db.Save(&booking).Error; err != nil {
+		log.Printf("Error updating booking: %v", err)
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+
+	// Set player emails for response
+	booking.PlayerEmails = input.PlayerEmails
+
+	// Return updated booking
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(booking); err != nil {
+		log.Printf("Error encoding response: %v", err)
+	}
+}
+
 // getBookingsHandler handles GET requests for bookings
 func getBookingsHandler(w http.ResponseWriter, r *http.Request) {
+	// Get the authenticated user ID
+	authenticatedUserID := getUserIDFromRequest(r)
+	if authenticatedUserID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	// Get query parameters
-	userID := r.URL.Query().Get("user_id")
 	courtID := r.URL.Query().Get("court_id")
 	date := r.URL.Query().Get("date")
 
 	// Initialize query with GORM
 	query := db
 
-	// Add filters if provided
-	if userID != "" {
-		query = query.Where("user_id = ?", userID)
-	}
+	// Always filter by authenticated user unless they're an admin (add admin check later)
+	// For now, we'll enforce that users can only see their own bookings
+	query = query.Where("user_id = ?", authenticatedUserID)
+
+	// Add additional filters if provided
 	if courtID != "" {
 		query = query.Where("court_id = ?", courtID)
 	}

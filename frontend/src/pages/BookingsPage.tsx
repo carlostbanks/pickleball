@@ -1,4 +1,3 @@
-// pickle/frontend/src/pages/BookingsPage.tsx
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { format, parseISO, isBefore } from 'date-fns';
@@ -23,27 +22,41 @@ const BookingsPage: React.FC = () => {
     const fetchBookings = async () => {
       setLoading(true);
       setError(null);
-
+    
       try {
         const response = await apiService.bookings.getBookings({
           userId: auth.user?.id,
         });
-
-        setBookings(response.bookings);
-
+    
+        // Check if bookings exists in response
+        if (!response || !response.bookings) {
+          setBookings([]);
+          return;
+        }
+    
+        // Transform the bookings from snake_case to camelCase
+        const transformedBookings = response.bookings.map(transformBooking);
+        setBookings(transformedBookings);
+    
         // Fetch court details for each booking
-        const courtIds = [...new Set(response.bookings.map((booking) => booking.courtId))];
+        const courtIds = [...new Set(transformedBookings
+          .filter(booking => booking && booking.courtId)
+          .map(booking => booking.courtId)
+        )];
+        
         const courtsData: Record<string, Court> = {};
-
+    
         for (const courtId of courtIds) {
           try {
             const court = await apiService.courts.getCourt({ courtId });
-            courtsData[courtId] = court;
+            if (court) {
+              courtsData[courtId] = court;
+            }
           } catch (err) {
             console.error(`Failed to fetch court ${courtId}:`, err);
           }
         }
-
+    
         setCourts(courtsData);
       } catch (err) {
         setError('Failed to load bookings. Please try again later.');
@@ -85,20 +98,50 @@ const BookingsPage: React.FC = () => {
     }
   };
 
-  const filteredBookings = bookings.filter((booking) => {
-    const bookingDate = parseISO(`${booking.date}T${booking.endTime}`);
-    const isPast = isBefore(bookingDate, new Date());
+  const transformBooking = (booking: any): Booking => {
+    return {
+      id: booking.id,
+      courtId: booking.court_id,
+      userId: booking.user_id,
+      date: booking.date,
+      startTime: booking.start_time,
+      endTime: booking.end_time,
+      numberOfPlayers: booking.number_of_players,
+      playerEmails: booking.player_emails || [],
+      status: booking.status as BookingStatus,
+      createdAt: booking.created_at,
+      updatedAt: booking.updated_at
+    };
+  };
+
+  // Make sure bookings is an array (defensive coding)
+  const safeBookings = Array.isArray(bookings) ? bookings : [];
+
+  const filteredBookings = safeBookings.filter((booking) => {
+    if (!booking || !booking.date || !booking.endTime) return false;
     
-    return activeTab === 'upcoming' 
-      ? !isPast && booking.status !== BookingStatus.CANCELLED
-      : isPast || booking.status === BookingStatus.CANCELLED;
+    try {
+      const bookingDate = parseISO(`${booking.date}T${booking.endTime}`);
+      const isPast = isBefore(bookingDate, new Date());
+      
+      return activeTab === 'upcoming' 
+        ? !isPast && booking.status !== BookingStatus.CANCELLED
+        : isPast || booking.status === BookingStatus.CANCELLED;
+    } catch (e) {
+      console.error("Error parsing date", e);
+      return false;
+    }
   });
 
   // Sort bookings by date and time
   const sortedBookings = [...filteredBookings].sort((a, b) => {
-    const dateA = new Date(`${a.date}T${a.startTime}`);
-    const dateB = new Date(`${b.date}T${b.startTime}`);
-    return dateA.getTime() - dateB.getTime();
+    try {
+      const dateA = new Date(`${a.date}T${a.startTime}`);
+      const dateB = new Date(`${b.date}T${b.startTime}`);
+      return dateA.getTime() - dateB.getTime();
+    } catch (e) {
+      return 0;
+    }
   });
 
   if (loading) {
@@ -145,16 +188,17 @@ const BookingsPage: React.FC = () => {
       ) : (
         <div className="bookings-list">
           {sortedBookings.map((booking) => {
-            const court = courts[booking.courtId];
+            // Safely access court data
+            const court = booking.courtId ? courts[booking.courtId] : undefined;
             
             return (
-              <div key={booking.id} className={`booking-card status-${booking.status.toLowerCase()}`}>
+              <div key={booking.id || 'unknown'} className={`booking-card status-${(booking.status || '').toLowerCase()}`}>
                 <div className="booking-left">
                   <div className="booking-date">
-                    {format(parseISO(booking.date), 'EEEE, MMMM d, yyyy')}
+                    {booking.date ? format(parseISO(booking.date), 'EEEE, MMMM d, yyyy') : 'Unknown date'}
                   </div>
                   <div className="booking-time">
-                    {booking.startTime} - {booking.endTime}
+                    {booking.startTime || '?'} - {booking.endTime || '?'}
                   </div>
                   <div className="booking-status">
                     {booking.status === BookingStatus.CONFIRMED && (
@@ -174,13 +218,13 @@ const BookingsPage: React.FC = () => {
                     {court ? (
                       <Link to={`/courts/${court.id}`}>{court.name}</Link>
                     ) : (
-                      'Loading court details...'
+                      'Court information unavailable'
                     )}
                   </h3>
                   {court && <div className="court-address">{court.address}</div>}
                   <div className="booking-details">
-                    <span>{booking.numberOfPlayers} Players</span>
-                    {booking.playerEmails.length > 0 && (
+                    <span>{booking.numberOfPlayers || 0} Players</span>
+                    {booking.playerEmails && booking.playerEmails.length > 0 && (
                       <div className="player-emails">
                         Invited: {booking.playerEmails.join(', ')}
                       </div>
